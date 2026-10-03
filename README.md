@@ -2,7 +2,7 @@
 
 Start with [GitOps, the bootstrap order, and why the repos are separate](docs/START-HERE.md).
 
-Review draft: local example only. Nothing has been applied or published. This is a small learning exercise, not a production baseline or a copy of someone's private estate.
+A public learning example with executable code and CI. Real homelab deployment requires your own inputs and credentials; this is not a production baseline.
 
 A visitor reaches Cloudflare over HTTPS. A connector inside your lab opens outbound connections to Cloudflare and proxies the request to a web container bound to `127.0.0.1:8080`. Your router needs no inbound port forward. Your origin needs no publicly reachable IP address; it does need internet connectivity. This works behind NAT/CGNAT when outbound connectivity is available. It does not require disabling IPv6: enforce the same security boundary for both address families.
 
