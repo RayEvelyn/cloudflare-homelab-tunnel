@@ -64,7 +64,7 @@ Cloudflare Access is appropriate for private applications; a public website in t
 
 ## Run the example after reviewing it
 
-The commands below are instructions for your lab, not evidence that this draft has run live.
+The commands below are instructions for your lab, not evidence that this example has been deployed to a real homelab.
 
 ```bash
 # Set account/zone identifiers and tokens through your approved environment.
@@ -108,3 +108,86 @@ Check origin binding with `ss -ltn`, public HTTPS with `curl`, connector health/
 - [Tunnel outbound connectivity](https://developers.cloudflare.com/tunnel/configuration/)
 - [Cloudflare Terraform DNS record](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record)
 - [API token creation](https://developers.cloudflare.com/api/resources/user/subresources/tokens/methods/create/)
+
+## Actual CI deployment: use your private deployment copy
+
+The public source is `https://github.com/RayEvelyn/cloudflare-homelab-tunnel.git`. Public examples run **hosted validation only**. The deployment job is intentionally ineligible in the public repository. Clone the code, review it, and create your **own private** repository/project for access to a dedicated homelab runner:
+
+```bash
+git clone https://github.com/RayEvelyn/cloudflare-homelab-tunnel.git
+cd cloudflare-homelab-tunnel
+# Replace YOUR_ACCOUNT with your own account; preserve the upstream origin.
+gh repo create YOUR_ACCOUNT/cloudflare-homelab-tunnel --private --source . --remote deployment --push
+```
+
+This includes a functional deployment path, not a claim that CI has deployed your lab already. The GitHub workflow requires an explicit `workflow_dispatch`, your private repository, its default branch, `DEPLOY_ENABLED=true`, runner labels `self-hosted,linux,homelab`, and environment `homelab`. Never attach a LAN-capable self-hosted runner to the public source repo. Configure protected branch/environment controls and restrict runner use to this private copy. Environment approval features depend on your GitHub plan; verify enforced behavior rather than assuming an environment name creates approval.
+
+### A persistent runner and explicit state ownership
+
+Use a dedicated persistent Linux runner with Terraform, Python3, OpenSSH tools, GNU `flock`, and network reachability to the intended lab host. State is not a CI cache or disposable workspace. Provision a private directory owned by the runner service account:
+
+```bash
+# On the dedicated runner; use its actual service account instead of homelab-runner.
+sudo install -d -m700 -o homelab-runner -g homelab-runner /var/lib/homelab-terraform
+```
+
+`TF_STATE_ROOT=/var/lib/homelab-terraform` and the private repository ID resolve to `/var/lib/homelab-terraform/<repository-id>/terraform.tfstate`. The local backend is explicit. A per-state `flock`, Terraform's local locking and CI per-repository concurrency serialize execution. This is **one persistent runner**, not a distributed locking design. Do not schedule the same state on multiple hosts. Back up this root independently; the helper preserves a timestamped private pre-apply state copy, which is not a substitute for off-host recovery. Never upload state or plans as public artifacts.
+
+The helper defaults to `plan`. It generates protected temporary inputs, validates, creates a saved plan, and rejects delete/replacement actions. `plan` exits without changing infrastructure. In the DNS VM repositories, `provision` applies that exact plan and returns without SSH/bootstrap. This Cloudflare repository rejects that action because it does not create a VM. `deploy` applies the exact plan, then uses an isolated SSH configuration to install/update the reviewed sample. No automatic destroy is included. Planned replacements require separate deliberate recovery review.
+
+### Configure inputs using CLI
+
+Define your target with nonsecret JSON in repository variable `HOMELAB_TFVARS_JSON`; do not put tokens, passwords or private keys there. For the DNS VM examples, use the fields from `terraform/terraform.tfvars.example`, omitting `ssh_public_key_path`: the helper writes the provided public key to a temporary file and supplies the path. For Cloudflare, use `zone_id`, `hostname`, and the **existing** `tunnel_id`. An API token is provider environment input, never a Terraform credential variable.
+
+```bash
+# Run against your private repository. Files below belong outside the public checkout.
+gh api --method PUT repos/YOUR_ACCOUNT/cloudflare-homelab-tunnel/environments/homelab
+gh variable set TF_STATE_ROOT --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel --body /var/lib/homelab-terraform
+gh variable set HOMELAB_TFVARS_JSON --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel < /secure/local/inputs.json
+# The public SSH key is not a secret; match the protected private key used for deployment.
+gh variable set SSH_PUBLIC_KEY --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel < /secure/local/id_ed25519.pub
+gh secret set SSH_PRIVATE_KEY --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel < /secure/local/id_ed25519
+gh secret set SSH_KNOWN_HOSTS --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel < /secure/local/known_hosts
+# Enable only after reviewing runner placement, inputs and permission boundaries.
+gh variable set DEPLOY_ENABLED --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel --body true
+gh workflow run homelab.yml --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel -f action=plan
+```
+
+Secret commands read stdin; credential values are not command-line arguments. Disable shell tracing and avoid logged terminals when handling secrets. Do not echo credentials for troubleshooting. Keep an independently verified host-key file rather than trusting an unauthenticated `ssh-keyscan` result.
+
+SSH uses mode600 temporary credentials and an isolated `HOMELAB_SSH_CONFIG`; every connection passes `-F`, strict host-key checking and batch mode. The target defaults to ubuntu on port22 and needs intended passwordless sudo for the reviewed guest bootstrap. Pin its key through your trusted administration path before deployment. This example uses an existing DMZ host and has no new-VM provision phase.
+
+### Existing bare-metal or VM target
+
+The same workload upload is available through `scripts/deploy-existing-host.sh` for a dedicated Linux host without Terraform provisioning. Supply the isolated `HOMELAB_SSH_CONFIG`, runtime directory and deployment inputs exactly as the CI helper does. It requires the same preverified keys, sudo authority and network policy. Review `scripts/deploy-local.py` before running it directly on the intended host; never on a Proxmox hypervisor. Package installation and container restart are actual changes.
+
+### GitLab option
+
+The included `.gitlab-ci.yml` runs hosted/shared validation and exposes a **manual** homelab job only for a private project, protected default branch and `DEPLOY_ENABLED=true`. Register a dedicated Linux runner tagged `homelab`, assign protected variables/secrets with the same names, and protect the `homelab` environment as your GitLab plan supports. It invokes the same helpers. Default `HOMELAB_ACTION=plan`; deliberately select `provision` or `deploy` only after reviewing the previous stage. Do not attach this runner to untrusted forks or public pipelines.
+
+Repository/runner access controls and token permissions are part of your lab setup; example YAML cannot enforce a router policy or your hosting account's approval settings by itself.
+
+### Cloudflare-specific deployment boundary
+
+This repo provisions a DNS record, **not a Proxmox VM**. Use `plan` or `deploy`; `provision` is refused. Set `HOMELAB_SSH_HOST` to your existing DMZ Linux host IP, plus `CLOUDFLARE_API_TOKEN` as a scoped DNS-edit secret. No tunnel-account creation credential belongs in CI.
+
+Before deployment, create the named tunnel once with the documented helper on the DMZ host and retain `/etc/cloudflared-homelab/config.yml` plus its protected external credential JSON there. Install cloudflared from its official distribution. CI reuses that existing configuration; it does not create a tunnel every run or put a tunnel token in Terraform state. The configuration must route the intended hostname to localhost8080 and end with the404 catch-all. Protect and back up the credential on the DMZ host.
+
+The deploy helper checks these prerequisites, deploys only the sample website, validates existing tunnel ingress and installs/starts a dedicated `homelab-cloudflared.service`. Existing dedicated unit configuration is backed up before editing; unrelated SSH/service configuration is untouched. Inspect existing connector services first to avoid unintended duplicate connectors. Runtime origin health is checked; verify the public HTTPS hostname independently and confirm DMZ-to-LAN denial. Cloudflare Access remains a separate deliberate policy for private applications.
+
+```bash
+gh variable set HOMELAB_SSH_HOST --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel --body YOUR_DMZ_HOST_IP
+gh secret set CLOUDFLARE_API_TOKEN --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel < /secure/local/cloudflare-dns-token
+gh workflow run homelab.yml --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel -f action=plan
+gh workflow run homelab.yml --repo YOUR_ACCOUNT/cloudflare-homelab-tunnel -f action=deploy
+```
+
+Cloudflare does not require Proxmox variables, DNS_BIND_IP or DNS_ALLOWED_CIDRS; its origin remains loopback8080.
+
+For a complete existing-host command path, load `SSH_PRIVATE_KEY` and `SSH_KNOWN_HOSTS` from your protected local secret facility, set `HOMELAB_SSH_HOST` (and DNS binding/ACL variables for the DNS repos), then run:
+
+```bash
+bash scripts/deploy-bare-metal.sh
+```
+
+This creates its own temporary isolated SSH files and performs the reviewed guest deployment, with no Terraform apply or VM creation. The existing host must be dedicated to this lab and already have the intended network segmentation and unique host keys. It installs packages and restarts only the named example workload; inspect the helper before using it on a host with existing services.

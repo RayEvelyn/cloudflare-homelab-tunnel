@@ -6,3 +6,9 @@
 *.pem
 credentials*.json
 __pycache__/
+
+.runtime/
+*.auto.tfvars.json
+compose.deploy.json
+
+*.tfvars.json
