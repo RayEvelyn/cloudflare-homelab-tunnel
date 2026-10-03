@@ -1,0 +1,15 @@
+services:
+  website:
+    image: nginxinc/nginx-unprivileged:1.28-alpine
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped

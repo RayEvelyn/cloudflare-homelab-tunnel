@@ -1,0 +1,4 @@
+# IDs and hostname are identifiers, not credentials. Replace with your own.
+zone_id   = "YOUR_ZONE_ID"
+hostname  = "lab.example.com"
+tunnel_id = "00000000-0000-0000-0000-000000000000"

@@ -1,0 +1,8 @@
+**/.terraform/
+**/*.tfstate*
+**/*.tfplan
+**/terraform.tfvars
+.env
+*.pem
+credentials*.json
+__pycache__/
