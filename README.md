@@ -13,6 +13,26 @@ visitor -> Cloudflare HTTPS edge -> outbound-established tunnel
 DMZ guest -- firewall DENY --> private LAN / hypervisor management
 ```
 
+
+## Capacity and reachability before deployment
+
+This example provisions **no VM**. Its website container and existing cloudflared connector run on your existing dedicated DMZ Linux host. Check free RAM, disk, service conflicts and sustained connector egress there before deploy. Terraform changes only the intended DNS record; start with local Compose to learn the origin before exposing its intended public hostname.
+
+**No GPU is required** for this DNS, Kubernetes, Rancher, telemetry or tunnel lesson. AI inference is a separate optional workload: model size, precision, context and concurrency determine RAM/VRAM requirements; these examples do not reserve or promise that capacity. Account separately for the chosen runner, GitLab if self-hosted, host OS and existing services. Check `free -h`, `df -h`, and Proxmox `pvesm status`/`pvesh get /nodes/YOUR_NODE/status` on the actual intended machines. On an existing cluster compare allocatable and requested resources with `kubectl describe nodes` and storage/PVC inventory before adding LGTM.
+
+| Initiator | Destination and port | Purpose / when needed |
+| --- | --- | --- |
+| Workstation | Selected GitHub or GitLab HTTPS 443 (or configured trusted local TLS port) | Clone, CLI API and pipeline control; not a substitute for runner network reach |
+| Dedicated selected runner | Proxmox TLS API TCP 8006 | VM Terraform path only; trust its CA, keep management outside DMZ |
+| Dedicated selected runner | Intended guest TCP 22 | Reviewed SSH/bootstrap paths; pin unique host keys |
+| Runner / guests | Approved package and container registries TCP 443 | Downloads; add only repository-specific approved HTTP 80 sources if required |
+| Workload runner | Intended Kubernetes TLS API TCP 6443, or configured KAS TLS route | Manifest/Helm paths only; scoped credentials and verified TLS |
+| Trusted LAN DNS clients | Intended DNS server UDP and TCP 53 | DNS paths only; deliberate listener and narrow ACL/firewall, not demo high ports |
+| DMZ tunnel host | Cloudflare UDP/TCP 7844 and approved HTTPS 443 | Cloudflare connector/install path only; no inbound router forward |
+
+A hosted GitHub validation runner has **no assumed route to your private LAN**. Configure only the selected private execution runner with necessary routes, DNS and firewall permissions. Keep DMZ-to-LAN/admin denial intact; tunnel connectivity alone does not segment your network. Test the selected route from the actual runner with TLS-verifying `curl`, pinned-key SSH and the README runtime commands before deploying, rather than opening management broadly.
+
+
 ## What is automated, and why
 
 Terraform manages **one proxied DNS CNAME** to an existing named tunnel. The helper creates a **locally managed named tunnel through the official Cloudflare API** and writes a protected credential file and local ingress configuration outside this repository. Tunnel lifecycle is deliberately outside Terraform in this beginner version.
@@ -108,6 +128,17 @@ Check origin binding with `ss -ltn`, public HTTPS with `curl`, connector health/
 - [Tunnel outbound connectivity](https://developers.cloudflare.com/tunnel/configuration/)
 - [Cloudflare Terraform DNS record](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record)
 - [API token creation](https://developers.cloudflare.com/api/resources/user/subresources/tokens/methods/create/)
+
+## Choose one CI provider before configuring deployment
+
+GitHub and GitLab are **alternative complete paths**. [CI-PATHS.md](CI-PATHS.md) provides the runner setup, GitLab CLI inputs and job controls alongside the GitHub commands below. Choose one owner for each lab. A source-control server stores code and schedules jobs; the selected **runner machine** executes Terraform, SSH, Ansible or Helm and needs the documented network access. Cloning this repository does not install a runner or create a route to Proxmox.
+
+| Choice | Source and job scheduler | Execution machine | Kubernetes access |
+| --- | --- | --- | --- |
+| GitHub | Your private GitHub repository and Actions | Your dedicated self-hosted Linux runner | Scoped kubeconfig where needed; GitLab/KAS not required |
+| GitLab | Your private GitLab project and GitLab CI | Your dedicated protected GitLab Linux runner | Scoped kubeconfig; GitLab agent/KAS is an optional separately configured route |
+
+The public upstream runs unprivileged hosted validation only. A local GitLab is useful if you want to host your own source and scheduler, but is **not** a prerequisite for the GitHub path. KAS does not provision VMs and is not a general-purpose Terraform runner.
 
 ## Actual CI deployment: use your private deployment copy
 
